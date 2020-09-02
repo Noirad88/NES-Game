@@ -11,6 +11,8 @@ top_of_screen = $08
   .rsset $0000  ;start variables at ram location 0
   
 player_x  .rs 1  ; .rs 1 means reserve one byte of space 
+player_y  .rs 1  ; .rs 1 means reserve one byte of space 
+
 ;;;;;;;;;;;;;;;
 
   .bank 1
