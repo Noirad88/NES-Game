@@ -1,0 +1,2 @@
+NESASM3 helloworld.asm
+fceuxdsp

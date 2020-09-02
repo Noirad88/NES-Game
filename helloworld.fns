@@ -1,0 +1,14 @@
+; helloworld.asm
+LoadSpritesLoop                  = $E093
+LoadPalettes                     = $E06A
+background_palette               = $E000
+LoadPalettesLoop                 = $E079
+sprite_palette                   = $E010
+Foreverloop                      = $E0AE
+vblankwait1                      = $E044
+vblankwait2                      = $E065
+clrmem                           = $E049
+RESET                            = $E030
+sprites                          = $E020
+NMI                              = $E0B1
+LoadSpritePaletteLoop            = $E086
