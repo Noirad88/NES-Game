@@ -1,5 +1,11 @@
-no_attributes = %1000010
+no_attributes = %00000000
 top_of_screen = $08
+bottom_of_screen = $08
+
+MACRO_ADD_A MACRO ;adds using CLC  
+            CLC
+            ADC \1
+            ENDM
 
   .inesprg 1   ; 1x 16KB PRG code
   .ineschr 1   ; 1x  8KB CHR data
@@ -30,8 +36,8 @@ sprite_palette:
   .db $22,$2F,$56,$17 ;sprite palette 4
 
 sprites:
-  .db $08, $3A, %00000000, $08   ;sprite 0
-  .db $08, $37, %00000000, $10   ;sprite 1
+  .db top_of_screen, $3A, no_attributes, $08   ;sprite 0
+  .db top_of_screen, $37, no_attributes, $10   ;sprite 1
   .db $10, $4f, %00000000, $08   ;sprite 2
   .db $10, $4f, %01000000, $10   ;sprite 3
 
@@ -75,6 +81,7 @@ LoadPalettes:
   LDA #$00
   STA $2006             ; write the low byte of $3F00 address
   LDX #$00              ; start out at 0
+
 LoadPalettesLoop:
   LDA background_palette, x        ; load data from address (palette + the value in x)
                           ; 1st time through loop it will load palette+0
@@ -110,8 +117,10 @@ LoadSpritesLoop:
   LDA #%00010000   ; enable sprites
   STA $2001
 
-  LDA $0203
+  LDA $0203        ;fetching player variables
   STA player_x
+  LDA $0200
+  STA player_y
 
 
 Foreverloop:
@@ -124,16 +133,109 @@ NMI:
   LDA #$02
   STA $4014       ; set the high byte (02) of the RAM address, start the transfer
 
+LatchController:
+  LDA #$01
+  STA $4016
+  LDA #$00
+  STA $4016       ; tell both the controllers to latch buttons
+
+ReadA: 
+  LDA $4016       ; player 1 - A
+  AND #%00000001  ; only look at bit 0
+  BEQ ReadADone   ; branch to ReadADone if button is NOT pressed (0)
+                  ; add instructions here to do something when button IS pressed (1)
+
+ReadADone:        ; handling this button is done
+
+ReadSelect: 
+  LDA $4016       ; player 1 - A
+  AND #%00000001  ; only look at bit 0
+  BEQ ReadSelectDone   ; branch to ReadADone if button is NOT pressed (0)
+
+ReadSelectDone:
+
+ReadStart: 
+  LDA $4016       ; player 1 - A
+  AND #%00000001  ; only look at bit 0
+  BEQ ReadStartDone   ; branch to ReadADone if button is NOT pressed (0)
+
+ReadStartDone:
+
+ReadUp: 
+  LDA $4016       ; player 1 - A
+  AND #%00000001  ; only look at bit 0
+  BEQ ReadUpDone   ; branch to ReadADone if button is NOT pressed (0)
+  BNE MoveUp
+
+MoveUp: ;move player down
+  LDA player_y        ;fetch player y position variable
+  STA $0200           ;get y position of accumulator and apply to top-left sprite
+  STA $0204           ;get y position of accumulator and apply to top-right sprite
+  TAX                 ;transfer accumulator to X to store original position
+  MACRO_ADD_A #$08    ;add 8 to accumulator
+  STA $0208           ;get y position of accumulator and apply to bottom-left sprite
+  STA $020C           ;get y position of accumulator and apply to bottom-right sprite
+  DEX                 ;decrement X 
+  STX player_y        ;store X to player y position variable (i.e., next loop will technically push player)
+
+ReadUpDone:
+
+ReadDown: 
+  LDA $4016       ; player 1 - A
+  AND #%00000001  ; only look at bit 0
+  BEQ ReadDownDone   ; branch to ReadADone if button is NOT pressed (0)
+  BNE MoveDown
+
+MoveDown: ;move player down
+  LDA player_y
+  STA $0200
+  STA $0204
+  TAX
+  MACRO_ADD_A #$08
+  STA $0208
+  STA $020C
+  INX
+  STX player_y
+
+ReadDownDone:
+
+ReadLeft: 
+  LDA $4016       ; player 1 - A
+  AND #%00000001  ; only look at bit 0
+  BNE MoveLeft
+  JMP ReadLeftDone   ; branch to ReadADone if button is NOT pressed (0)
+  
+MoveLeft: ;move player left
   LDA player_x
   STA $0203
   STA $020B
   TAX
-  CLC
-  ADC #$08
+  MACRO_ADD_A #$08
+  STA $0207
+  STA $020F
+  DEX
+  STX player_x  
+
+ReadLeftDone:
+
+ReadRight: 
+  LDA $4016       ; player 1 - A
+  AND #%00000001  ; only look at bit 0
+  BNE MoveRight
+  JMP ReadRightDone ; branch to ReadADone if button is NOT pressed (0)
+
+MoveRight: ;move player right
+  LDA player_x
+  STA $0203
+  STA $020B
+  TAX
+  MACRO_ADD_A #$08
   STA $0207
   STA $020F
   INX
   STX player_x
+
+ReadRightDone:
 
   RTI
 
