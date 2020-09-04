@@ -41,6 +41,10 @@ sprites:
   .db $10, $4f, %00000000, $08   ;sprite 2
   .db $10, $4f, %01000000, $10   ;sprite 3
 
+  .include "background_tiles.asm" ;our background map
+
+  .include "background_tiles_attributes.asm" ;our background map attributes
+
 RESET:
   SEI          ; disable IRQs
   CLD          ; disable decimal mode
@@ -81,27 +85,20 @@ LoadPalettes:
   LDA #$00
   STA $2006             ; write the low byte of $3F00 address
   LDX #$00              ; start out at 0
-
 LoadPalettesLoop:
   LDA background_palette, x        ; load data from address (palette + the value in x)
-                          ; 1st time through loop it will load palette+0
-                          ; 2nd time through loop it will load palette+1
-                          ; 3rd time through loop it will load palette+2
-                          ; etc
   STA $2007             ; write to PPU
   INX                   ; X = X + 1
   CPX #$10              ; Compare X to hex $10, decimal 16 - copying 16 bytes = 4 sprites
   BNE LoadPalettesLoop  ; Branch to LoadPalettesLoop if compare was Not Equal to zero  
-
   LDX #$00  ;reset the x register to zero so we can start loading sprite palette colors.    
-        
+
 LoadSpritePaletteLoop:
   LDA sprite_palette, x     ;load palette byte
   STA $2007					;write to PPU
   INX                   	;set index to next byte
   CPX #$10            
   BNE LoadSpritePaletteLoop  ;if x = $10, all done
-
   LDX #$00              ; start at 0
 LoadSpritesLoop:
   LDA sprites, x        ; load data from address (sprites +  x)
@@ -109,12 +106,42 @@ LoadSpritesLoop:
   INX                   ; X = X + 1
   CPX #$10              ; Compare X to hex $10, decimal 16
   BNE LoadSpritesLoop   ; Branch to LoadSpritesLoop if compare was Not Equal to zero
-                        ; if compare was equal to 32, keep going down 
+  LDX #$00 
 
-  LDA #%10000000   ; enable NMI, sprites from Pattern Table 0
+LoadBackground:
+  LDA $2002             ; read PPU status to reset the high/low latch
+  LDA #$20
+  STA $2006             ; write the high byte of $2000 address
+  LDA #$00
+  STA $2006             ; write the low byte of $2000 address
+  LDX #$00              ; start out at 0
+LoadBackgroundLoop:
+  LDA background_tiles, x     ; load data from address (background + the value in x)
+  STA $2007             ; write to PPU
+  INX                   ; X = X + 1
+  CPX #$256           ; Compare X to hex $80, decimal 128 - copying 128 bytes
+  BNE LoadBackgroundLoop  ; Branch to LoadBackgroundLoop if compare was Not Equal to zero
+                        ; if compare was equal to 128, keep going down
+
+  LDX #$00
+LoadAttribute:
+  LDA $2002             ; read PPU status to reset the high/low latch
+  LDA #$23
+  STA $2006             ; write the high byte of $23C0 address
+  LDA #$C0
+  STA $2006             ; write the low byte of $23C0 address
+  LDX #$00  ; start out at 0
+LoadAttributeLoop:
+  LDA background_tiles_attributes, x      ; load data from address (attribute + the value in x)
+  STA $2007             ; write to PPU
+  INX                   ; X = X + 1
+  CPX #$40              ; Compare X to hex $08, decimal 8 - copying 8 bytes
+  BNE LoadAttributeLoop
+
+  LDA #%10010000   ; enable NMI, sprites from Pattern Table 0
   STA $2000
-  
-  LDA #%00010000   ; enable sprites
+
+  LDA #%00011110   ; enable background and sprites
   STA $2001
 
   LDA $0203        ;fetching player variables
