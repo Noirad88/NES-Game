@@ -1,6 +1,7 @@
 no_attributes = %00000000
 top_of_screen = $08
 bottom_of_screen = $08
+nametable_max = $383
 
 MACRO_ADD_A MACRO ;adds using CLC  
             CLC
@@ -16,34 +17,35 @@ MACRO_ADD_A MACRO ;adds using CLC
 ;DECLARE SOME VARIABLES HERE
   .rsset $0000  ;start variables at ram location 0
   
-player_x  .rs 1  ; .rs 1 means reserve one byte of space 
-player_y  .rs 1  ; .rs 1 means reserve one byte of space 
+low_byte_pointer   .rs 1
+high_byte_pointer   .rs 1
+player_x  .rs 1  ; .rs 1 means reserve one db of space 
+player_y  .rs 1  ; .rs 1 means reserve one db of space 
 
 ;;;;;;;;;;;;;;;
 
   .bank 1
   .org $E000
+
+  .include "background_tiles"
+
 background_palette:
-  .db $22,$24,$1A,$0F	;background palette 1
-  .db $22,$32,$18,$0F	;background palette 2
-  .db $22,$31,$21,$0F	;background palette 3
-  .db $22,$25,$16,$0F	;background palette 4
+  .db $0f,$17,$28,$36
+  .db $0f,$04,$16,$25
+  .db $0f,$17,$27,$3a
+  .db $0f,$09,$19,$29
   
 sprite_palette:
-  .db $22,$27,$14,$42	;sprite palette 1
-  .db $22,$2A,$20,$27	;sprite palette 2
-  .db $22,$36,$30,$47	;sprite palette 3
-  .db $22,$2F,$56,$17 ;sprite palette 4
+  .db $0f,$17,$28,$36
+  .db $0f,$04,$16,$25
+  .db $0f,$17,$27,$3a
+  .db $0f,$09,$19,$29
 
 sprites:
-  .db top_of_screen, $3A, no_attributes, $08   ;sprite 0
-  .db top_of_screen, $37, no_attributes, $10   ;sprite 1
-  .db $10, $4f, %00000000, $08   ;sprite 2
-  .db $10, $4f, %01000000, $10   ;sprite 3
-
-  .include "background_tiles.asm" ;our background map
-
-  .include "background_tiles_attributes.asm" ;our background map attributes
+  .db top_of_screen, $04, no_attributes, $08   ;sprite 0
+  .db top_of_screen, $05, no_attributes, $10   ;sprite 1
+  .db $10, $14, no_attributes, $08   ;sprite 2
+  .db $10, $15, no_attributes, $10   ;sprite 3
 
 RESET:
   SEI          ; disable IRQs
@@ -81,22 +83,22 @@ vblankwait2:      ; Second wait for vblank, PPU is ready after this
 LoadPalettes:
   LDA $2002             ; read PPU status to reset the high/low latch
   LDA #$3F
-  STA $2006             ; write the high byte of $3F00 address
+  STA $2006             ; write the high db of $3F00 address
   LDA #$00
-  STA $2006             ; write the low byte of $3F00 address
+  STA $2006             ; write the low db of $3F00 address
   LDX #$00              ; start out at 0
 LoadPalettesLoop:
   LDA background_palette, x        ; load data from address (palette + the value in x)
   STA $2007             ; write to PPU
   INX                   ; X = X + 1
-  CPX #$10              ; Compare X to hex $10, decimal 16 - copying 16 bytes = 4 sprites
+  CPX #$10              ; Compare X to hex $10, decimal 16 - copying 16 dbs = 4 sprites
   BNE LoadPalettesLoop  ; Branch to LoadPalettesLoop if compare was Not Equal to zero  
   LDX #$00  ;reset the x register to zero so we can start loading sprite palette colors.    
 
 LoadSpritePaletteLoop:
-  LDA sprite_palette, x     ;load palette byte
+  LDA sprite_palette, x     ;load palette db
   STA $2007					;write to PPU
-  INX                   	;set index to next byte
+  INX                   	;set index to next db
   CPX #$10            
   BNE LoadSpritePaletteLoop  ;if x = $10, all done
   LDX #$00              ; start at 0
@@ -111,38 +113,43 @@ LoadSpritesLoop:
 LoadBackground:
   LDA $2002             ; read PPU status to reset the high/low latch
   LDA #$20
-  STA $2006             ; write the high byte of $2000 address
+  STA $2006             ; write the high db of $2000 address
   LDA #$00
-  STA $2006             ; write the low byte of $2000 address
-  LDX #$00              ; start out at 0
-LoadBackgroundLoop:
-  LDA background_tiles, x     ; load data from address (background + the value in x)
-  STA $2007             ; write to PPU
-  INX                   ; X = X + 1
-  CPX #$256           ; Compare X to hex $80, decimal 128 - copying 128 bytes
-  BNE LoadBackgroundLoop  ; Branch to LoadBackgroundLoop if compare was Not Equal to zero
-                        ; if compare was equal to 128, keep going down
+  STA $2006             ; write the low db of $2000 address
 
-  LDX #$00
-LoadAttribute:
-  LDA $2002             ; read PPU status to reset the high/low latch
-  LDA #$23
-  STA $2006             ; write the high byte of $23C0 address
-  LDA #$C0
-  STA $2006             ; write the low byte of $23C0 address
-  LDX #$00  ; start out at 0
-LoadAttributeLoop:
-  LDA background_tiles_attributes, x      ; load data from address (attribute + the value in x)
-  STA $2007             ; write to PPU
-  INX                   ; X = X + 1
-  CPX #$40              ; Compare X to hex $08, decimal 8 - copying 8 bytes
-  BNE LoadAttributeLoop
+  LDA #$00
+  STA low_byte_pointer ;store low db of loop/background_tiles
+  LDA #HIGH(background_tiles)
+  STA high_byte_pointer ;store high db of loop/background_tiles
+  
+  LDX #$00            ; start at pointer + 0
+  LDY #$00
+LoadBackgroundOutsideLoop:
 
+LoadBackgroundInsideLoop:
+  LDA [low_byte_pointer], Y  ; copy one background db from address in pointer plus Y
+  STA $2007           ; this runs 256 * 4 times
+
+  INY                 ; inside loop counter
+  CPY #$00
+  BNE LoadBackgroundInsideLoop      ; run the inside loop 256 times before continuing down
+
+  INC high_byte_pointer       ; low db went 0 to 256, so high db needs to be changed now
+
+  INX
+  CPX #$04
+  BNE LoadBackgroundOutsideLoop     ; run the outside loop 256 times before continuing down
+
+EnablingSpritesAndBackgrounds:
   LDA #%10010000   ; enable NMI, sprites from Pattern Table 0
   STA $2000
 
   LDA #%00011110   ; enable background and sprites
   STA $2001
+
+  LDA #$00
+  STA $2005
+  STA $2005
 
   LDA $0203        ;fetching player variables
   STA player_x
@@ -156,9 +163,9 @@ Foreverloop:
 NMI:
 
   LDA #$00
-  STA $2003       ; set the low byte (00) of the RAM address
+  STA $2003       ; set the low db (00) of the RAM address
   LDA #$02
-  STA $4014       ; set the high byte (02) of the RAM address, start the transfer
+  STA $4014       ; set the high db (02) of the RAM address, start the transfer
 
 LatchController:
   LDA #$01
@@ -279,4 +286,4 @@ ReadRightDone:
 
   .bank 2
   .org $0000
-  .incbin "mario.chr"   ;includes 8KB graphics file from SMB1
+  .incbin "spriteSheet.chr"   ;includes 8KB graphics file from SMB1
