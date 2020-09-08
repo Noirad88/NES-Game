@@ -1,7 +1,12 @@
-no_attributes = %00000000
-top_of_screen = $08
-bottom_of_screen = $08
-nametable_max = $383
+no_attributes =     %00000000
+top_of_screen =     $08
+bottom_of_screen =  $08
+nametable_max =     $383
+direction_up =      $01
+direction_down =    $02
+direction_left =    $03
+direction_right =   $04
+moveAmount =        $08
 
 MACRO_ADD_A MACRO ;adds using CLC  
             CLC
@@ -12,15 +17,18 @@ MACRO_ADD_A MACRO ;adds using CLC
   .ineschr 1   ; 1x  8KB CHR data
   .inesmap 0   ; mapper 0 = NROM, no bank swapping
   .inesmir 1   ; background mirroring
-
+                  
 ;;;;;;;;;;;;;;;
 ;DECLARE SOME VARIABLES HERE
   .rsset $0000  ;start variables at ram location 0
   
-low_byte_pointer   .rs 1
+low_byte_pointer    .rs 1
 high_byte_pointer   .rs 1
-player_x  .rs 1  ; .rs 1 means reserve one db of space 
-player_y  .rs 1  ; .rs 1 means reserve one db of space 
+player_x            .rs 1  ; .rs 1 means reserve one db of space 
+player_y            .rs 1  ; .rs 1 means reserve one db of space 
+player_vel          .rs 1
+player_move_dir     .rs 1
+test_shift          .rs 1
 
 ;;;;;;;;;;;;;;;
 
@@ -36,16 +44,16 @@ background_palette:
   .db $0f,$09,$19,$29
   
 sprite_palette:
-  .db $0f,$17,$28,$36
+  .db $0f,$17,$28,$39
   .db $0f,$04,$16,$25
   .db $0f,$17,$27,$3a
   .db $0f,$09,$19,$29
 
 sprites:
-  .db top_of_screen, $04, no_attributes, $08   ;sprite 0
-  .db top_of_screen, $05, no_attributes, $10   ;sprite 1
-  .db $10, $14, no_attributes, $08   ;sprite 2
-  .db $10, $15, no_attributes, $10   ;sprite 3
+  .db top_of_screen, $05, no_attributes, $08   ;sprite 0
+  .db top_of_screen, $06, no_attributes, $10   ;sprite 1
+  .db $10, $15, no_attributes, $08   ;sprite 2
+  .db $10, $16, no_attributes, $10   ;sprite 3
 
 RESET:
   SEI          ; disable IRQs
@@ -86,6 +94,7 @@ LoadPalettes:
   STA $2006             ; write the high db of $3F00 address
   LDA #$00
   STA $2006             ; write the low db of $3F00 address
+
   LDX #$00              ; start out at 0
 LoadPalettesLoop:
   LDA background_palette, x        ; load data from address (palette + the value in x)
@@ -149,13 +158,31 @@ EnablingSpritesAndBackgrounds:
 
   LDA #$00
   STA $2005
-  STA $2005
 
   LDA $0203        ;fetching player variables
   STA player_x
   LDA $0200
   STA player_y
 
+  LDA #$01
+  STA test_shift
+
+
+  ;TESTING OUT CODE BELOW TO REWRITE NAMETABLES
+  ;backgrounds located on PPU
+  ;first tile starts at $2000
+  ;changing first tile (#$00) to new (#$01)
+
+  LDA $2002   ;read PPU to clear address
+  LDA #$20
+  STA $2006
+  LDA #$00
+  STA $2006
+  LDA #$01
+  STA $2007
+
+
+Sounds:
 
 Foreverloop:
   JMP Foreverloop     ;jump back to Forever, infinite loop
@@ -167,19 +194,37 @@ NMI:
   LDA #$02
   STA $4014       ; set the high db (02) of the RAM address, start the transfer
 
+CheckVelocityBeforeLatchingController:
+  
+  ; first check if we can move; we shouldn't move if we're already moving
+  LDX player_vel
+  CPX #$00             
+  BEQ LatchController 
+  JMP MovePlayer 
+
 LatchController:
+  ; tell both the controllers to latch buttons
   LDA #$01
   STA $4016
   LDA #$00
-  STA $4016       ; tell both the controllers to latch buttons
+  STA $4016 
 
-ReadA: 
+ReadA:
+
   LDA $4016       ; player 1 - A
   AND #%00000001  ; only look at bit 0
   BEQ ReadADone   ; branch to ReadADone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
 
 ReadADone:        ; handling this button is done
+
+ReadB: 
+  LDA $4016       ; player 1 - A
+  AND #%00000001  ; only look at bit 0
+  BEQ ReadBDone   ; branch to ReadADone if button is NOT pressed (0)
+                  ; add instructions here to do something when button IS pressed (1)
+
+ReadBDone:        ; handling this button is done
 
 ReadSelect: 
   LDA $4016       ; player 1 - A
@@ -198,78 +243,154 @@ ReadStartDone:
 ReadUp: 
   LDA $4016       ; player 1 - A
   AND #%00000001  ; only look at bit 0
-  BEQ ReadUpDone   ; branch to ReadADone if button is NOT pressed (0)
-  BNE MoveUp
+  BEQ ReadDown   ; branch to ReadADone if button is NOT pressed (0)
 
-MoveUp: ;move player down
-  LDA player_y        ;fetch player y position variable
-  STA $0200           ;get y position of accumulator and apply to top-left sprite
-  STA $0204           ;get y position of accumulator and apply to top-right sprite
-  TAX                 ;transfer accumulator to X to store original position
-  MACRO_ADD_A #$08    ;add 8 to accumulator
-  STA $0208           ;get y position of accumulator and apply to bottom-left sprite
-  STA $020C           ;get y position of accumulator and apply to bottom-right sprite
-  DEX                 ;decrement X 
-  STX player_y        ;store X to player y position variable (i.e., next loop will technically push player)
-
-ReadUpDone:
+SetUp: ;set player up
+  LDX #direction_up
+  STX player_move_dir
+  ;reset our velocity
+  LDX #moveAmount
+  STX player_vel
+  JMP MovePlayer
 
 ReadDown: 
   LDA $4016       ; player 1 - A
   AND #%00000001  ; only look at bit 0
-  BEQ ReadDownDone   ; branch to ReadADone if button is NOT pressed (0)
-  BNE MoveDown
+  BEQ ReadLeft   ; branch to ReadADone if button is NOT pressed (0)
 
-MoveDown: ;move player down
-  LDA player_y
-  STA $0200
-  STA $0204
-  TAX
-  MACRO_ADD_A #$08
-  STA $0208
-  STA $020C
-  INX
-  STX player_y
-
-ReadDownDone:
+SetDown: ;set player down
+  LDX #direction_down
+  STX player_move_dir
+  ;reset our velocity
+  LDX #moveAmount
+  STX player_vel
+  JMP MovePlayer
 
 ReadLeft: 
   LDA $4016       ; player 1 - A
   AND #%00000001  ; only look at bit 0
-  BNE MoveLeft
-  JMP ReadLeftDone   ; branch to ReadADone if button is NOT pressed (0)
+  BEQ ReadRight
   
-MoveLeft: ;move player left
-  LDA player_x
-  STA $0203
-  STA $020B
-  TAX
-  MACRO_ADD_A #$08
-  STA $0207
-  STA $020F
-  DEX
-  STX player_x  
-
-ReadLeftDone:
+SetLeft: ;set player left
+  LDX #direction_left
+  STX player_move_dir
+  ;reset our velocity
+  LDX #moveAmount
+  STX player_vel
+  JMP MovePlayer 
 
 ReadRight: 
   LDA $4016       ; player 1 - A
   AND #%00000001  ; only look at bit 0
-  BNE MoveRight
-  JMP ReadRightDone ; branch to ReadADone if button is NOT pressed (0)
+  BEQ MovePlayer
 
-MoveRight: ;move player right
-  LDA player_x
+SetRight: ;set player right
+  LDX #direction_right
+  STX player_move_dir
+  ;reset our velocity
+  LDX #moveAmount
+  STX player_vel
+
+; set continues moves player in the respective direction for 8 pixels
+MovePlayer:
+  LDX player_vel
+  CPX #$00             
+  BNE MoveUp    ; if player is set to move, continue movement along 8 pixels
+  JMP MovePlayerEnd
+
+MoveUp:
+  ;if this direction is not set, check next direction
+  LDX player_move_dir    
+  CPX #direction_up 
+  BNE MoveDown 
+
+  ;incrememnt the player positions (+8 for other 2, right sprites)
+  LDX player_y
+  DEX
+  TXA
+  STA player_y
+  STA $0200
+  STA $0204
+  MACRO_ADD_A #$08
+  STA $0208
+  STA $020C       
+  
+  ; decrement the player 'velocity' so we know when to stop moving
+  LDY player_vel
+  DEY
+  STY player_vel   
+  JMP Animate 
+
+MoveDown:
+  LDX player_move_dir  
+  CPX #direction_down 
+  BNE MoveLeft            
+
+  LDX player_y
+  INX
+  TXA
+  STA player_y
+  STA $0200
+  STA $0204
+  MACRO_ADD_A #$08
+  STA $0208
+  STA $020C
+  
+  LDY player_vel
+  DEY
+  STY player_vel   
+  JMP Animate
+
+MoveLeft:
+
+  LDX player_move_dir    
+  CPX #direction_left 
+  BNE MoveRight            
+  
+  LDX player_x
+  DEX
+  TXA
+  STA player_x
   STA $0203
   STA $020B
-  TAX
   MACRO_ADD_A #$08
   STA $0207
   STA $020F
-  INX
-  STX player_x
+  
+  LDY player_vel
+  DEY
+  STY player_vel    
+  JMP Animate
 
-ReadRightDone:
+MoveRight:
+
+  LDX player_move_dir   
+  CPX #direction_right 
+  BNE MovePlayerEnd            
+
+  LDX player_x
+  INX
+  TXA
+  STA player_x
+  STA $0203
+  STA $020B
+  MACRO_ADD_A #$08
+  STA $0207
+  STA $020F
+  
+  LDY player_vel
+  DEY
+  STY player_vel  
+
+Animate:
+; we jump to here if we have moved, so this is the place where we animate
+
+
+MovePlayerEnd:
+
+LDA test_shift
+INC
+STA test_shift
 
   RTI
 
