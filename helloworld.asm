@@ -8,6 +8,30 @@ direction_left =    $03
 direction_right =   $04
 moveAmount =        $08
 
+WAIT_FOR_VBLANK MACRO
+ vblankAgain:
+              BIT $2002
+              BPL vblankAgain
+              ENDM
+
+CHANGE_BG_TILE MACRO
+               WAIT_FOR_VBLANK                 
+               LDX $2002             ; read PPU status to reset the high/low latch
+               LDX #$20
+               STX $2006             ; write the high db of $2000 address
+               LDX \1                ; low byte var is first
+               STX $2006             ; write the low db of $2000 address
+               LDX \2                ; tile hex
+               STX $2007
+               RESET_SCROLL
+               ENDM
+
+RESET_SCROLL MACRO
+             LDA #$00
+             STA $2005
+             STA $2005
+             ENDM
+
 MACRO_ADD_A MACRO ;adds using CLC  
             CLC
             ADC \1
@@ -28,7 +52,7 @@ player_x            .rs 1  ; .rs 1 means reserve one db of space
 player_y            .rs 1  ; .rs 1 means reserve one db of space 
 player_vel          .rs 1
 player_move_dir     .rs 1
-test_shift          .rs 1
+low_byte_count      .rs 1
 
 ;;;;;;;;;;;;;;;
 
@@ -36,6 +60,17 @@ test_shift          .rs 1
   .org $E000
 
   .include "background_tiles"
+
+metasprite:
+
+	.byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
 
 background_palette:
   .db $0f,$17,$28,$36
@@ -165,22 +200,6 @@ EnablingSpritesAndBackgrounds:
   STA player_y
 
   LDA #$01
-  STA test_shift
-
-
-  ;TESTING OUT CODE BELOW TO REWRITE NAMETABLES
-  ;backgrounds located on PPU
-  ;first tile starts at $2000
-  ;changing first tile (#$00) to new (#$01)
-
-  LDA $2002   ;read PPU to clear address
-  LDA #$20
-  STA $2006
-  LDA #$00
-  STA $2006
-  LDA #$01
-  STA $2007
-
 
 Sounds:
 
@@ -215,6 +234,10 @@ ReadA:
   AND #%00000001  ; only look at bit 0
   BEQ ReadADone   ; branch to ReadADone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
+  CHANGE_BG_TILE #$00, #$01 ;pressing 'A' changes background tiles
+  CHANGE_BG_TILE #$01, #$02
+  CHANGE_BG_TILE #$02, #$03
+  CHANGE_BG_TILE #$03, #$04
 
 ReadADone:        ; handling this button is done
 
@@ -385,12 +408,34 @@ MoveRight:
 Animate:
 ; we jump to here if we have moved, so this is the place where we animate
 
-
 MovePlayerEnd:
 
-LDA test_shift
-INC
-STA test_shift
+DrawAgain:
+
+  LDX #$2D
+  STX low_byte_count
+
+StartBuildSection:
+
+  WAIT_FOR_VBLANK
+  LDX $2002             ; read PPU status to reset the high/low latch
+  LDX #$20
+  STX $2006             ; write the high db of $2000 address
+  LDX low_byte_count
+  STX $2006             ; write the low db of $2000 address
+  LDX #$00
+  RESET_SCROLL
+
+BuildRow: 
+  LDA metasprite, x     ;load palette db
+  STA $2007					;write to PPU
+  INX                   	;set index to next db
+  CPX #09            
+  BNE BuildRow  ;if x = $10, all done
+  LDA low_byte_count
+  MACRO_ADD_A #32
+  STA low_byte_count
+  JMP StartBuildSection
 
   RTI
 
