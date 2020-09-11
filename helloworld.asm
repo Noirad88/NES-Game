@@ -8,14 +8,8 @@ direction_left =    $03
 direction_right =   $04
 moveAmount =        $08
 
-WAIT_FOR_VBLANK MACRO
- vblankAgain:
-              BIT $2002
-              BPL vblankAgain
-              ENDM
 
-CHANGE_BG_TILE MACRO
-               WAIT_FOR_VBLANK                 
+CHANGE_BG_TILE MACRO               
                LDX $2002             ; read PPU status to reset the high/low latch
                LDX #$20
                STX $2006             ; write the high db of $2000 address
@@ -23,12 +17,12 @@ CHANGE_BG_TILE MACRO
                STX $2006             ; write the low db of $2000 address
                LDX \2                ; tile hex
                STX $2007
-               RESET_SCROLL
                ENDM
 
 RESET_SCROLL MACRO
-             LDA #$00
+             LDA world_scroll_x
              STA $2005
+             LDA world_scroll_y
              STA $2005
              ENDM
 
@@ -53,6 +47,18 @@ player_y            .rs 1  ; .rs 1 means reserve one db of space
 player_vel          .rs 1
 player_move_dir     .rs 1
 low_byte_count      .rs 1
+do_draw             .rs 1
+world_scroll_x      .rs 1
+world_scroll_y      .rs 1
+nmi_flag            .rs 1
+; variables for core drawing operaions
+draw_loop_start_low_byte  .rs 1
+draw_loop_start_high_byte .rs 1
+draw_loop_width           .rs 1
+draw_loop_height          .rs 1
+draw_loop_tile_position   .rs 1
+draw_loop_current_x       .rs 1
+draw_loop_current_y       .rs 1
 
 ;;;;;;;;;;;;;;;
 
@@ -63,7 +69,7 @@ low_byte_count      .rs 1
 
 metasprite:
 
-	.byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+	.byte $09,$03,$09,$04,$03,$09,$03,$01,$09
   .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
   .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
   .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
@@ -71,6 +77,8 @@ metasprite:
   .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
   .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
   .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  
+  
 
 background_palette:
   .db $0f,$17,$28,$36
@@ -199,21 +207,28 @@ EnablingSpritesAndBackgrounds:
   LDA $0200
   STA player_y
 
-  LDA #$01
+  LDA #$00          ;setting our test variable
+  STA do_draw
+  STA world_scroll_x
+  STA world_scroll_y
 
 Sounds:
+  
+GameLoop: ;------------------------------------------------------------------------------
+  
+vblankwait3:       ; First wait for vblank to make sure PPU is ready
+  BIT $2002
+  BPL vblankwait3
 
-Foreverloop:
-  JMP Foreverloop     ;jump back to Forever, infinite loop
+  LDA #$00
+  STA nmi_flag
 
-NMI:
+CheckVelocityBeforeLatchingController:
 
   LDA #$00
   STA $2003       ; set the low db (00) of the RAM address
   LDA #$02
   STA $4014       ; set the high db (02) of the RAM address, start the transfer
-
-CheckVelocityBeforeLatchingController:
   
   ; first check if we can move; we shouldn't move if we're already moving
   LDX player_vel
@@ -230,14 +245,14 @@ LatchController:
 
 ReadA:
 
+  LDA #$00
+  STA do_draw
   LDA $4016       ; player 1 - A
   AND #%00000001  ; only look at bit 0
   BEQ ReadADone   ; branch to ReadADone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
-  CHANGE_BG_TILE #$00, #$01 ;pressing 'A' changes background tiles
-  CHANGE_BG_TILE #$01, #$02
-  CHANGE_BG_TILE #$02, #$03
-  CHANGE_BG_TILE #$03, #$04
+  LDA #$01
+  STA do_draw
 
 ReadADone:        ; handling this button is done
 
@@ -410,45 +425,90 @@ Animate:
 
 MovePlayerEnd:
 
-DrawAgain:
+  JMP GameLoop ;---------------------------------------------------------------------
 
-  LDX #$2D
-  STX low_byte_count
 
-StartBuildSection:
+NMI: ;start of our game loop ------------------------------------------------------
+  
+  LDA #$01        ; just test/checking NMI for understanding
+  STA nmi_flag 
 
-  WAIT_FOR_VBLANK
+  LDA #%10010000  ;refresh PPU
+  STA $2000
+  LDA #%00011110   
+  STA $2001
+
+  ; done setting up PPU
+
+DrawLogic:
+  
+  LDA do_draw
+  CMP #$01
+  BNE EndDrawLogic
+  ; assigning relative variables
+  LDA #$09
+  STA draw_loop_width
+  LDA #$2D
+  STA draw_loop_start_low_byte
+  LDA #$20
+  STA draw_loop_start_high_byte
+  LDA #$00
+  STA draw_loop_current_x
+
+
+  LDY #$00
+  ;draw_loop_start_low_byte
+  ;draw_loop_start_high_byte (constant)
+  ;draw_loop_width (#$09)
+  ;draw_loop_height (this should be calculated with start byte)
+  ;draw_loop_tile position (Y)
+  ;draw_loop_current_x
+  ;draw_loop_current_y 
+
+drawLoopInit:
+
   LDX $2002             ; read PPU status to reset the high/low latch
-  LDX #$20
+  LDX draw_loop_start_high_byte
   STX $2006             ; write the high db of $2000 address
-  LDX low_byte_count
-  STX $2006             ; write the low db of $2000 address
-  LDX #$00
+  LDA draw_loop_start_low_byte
+  STA $2006             ; write the low db of $2000 address
+
+drawLoop:
+  LDX metasprite, Y                 ; add tile on metasprite at Y in ppu
+  STX $2007
+  INY                               ;increment metasprite for tile
+
+  LDA draw_loop_current_x           ;icrement current position in row
+  MACRO_ADD_A #$01
+  STA draw_loop_current_x 
+
+  CMP draw_loop_width               ;compare current position in row with width of metasprite draw operation
+  BNE drawLoop                      ; if y is not 9, we continue to loop.
+                                    ; otherwise, we need to:
+  LDA #$00                          ;reset current position (draw_loop_current_x )
+  STA draw_loop_current_x
+
+  LDA draw_loop_start_low_byte      ;increment 20 to low_byte_pointer
+  MACRO_ADD_A #$20       
+  STA draw_loop_start_low_byte
+                                    ;has low_byte rolled back to 00?
+  CMP #$ED                          ;compare current position OF row with height of metasprites draw operation
+  BNE drawLoopInit                  ;if not, start drawing the new row
+  
+
+EndDrawLogic:
   RESET_SCROLL
 
-BuildRow: 
-  LDA metasprite, x     ;load palette db
-  STA $2007					;write to PPU
-  INX                   	;set index to next db
-  CPX #09            
-  BNE BuildRow  ;if x = $10, all done
-  LDA low_byte_count
-  MACRO_ADD_A #32
-  STA low_byte_count
-  JMP StartBuildSection
+  RTI ;end of NMI/Done drawing
 
-  RTI
-
-;;;;;;;;;;;;;;  
+;Vectors  
 
   .org $FFFA     ;first of the three vectors starts here
-  .dw NMI        ;when an NMI happens (once per frame if enabled) the 
-                   ;processor will jump to the label NMI:
-  .dw RESET      ;when the processor first turns on or is reset, it will jump
-                   ;to the label RESET:
-  .dw 0          ;external interrupt IRQ is not used in this tutorial
-  
-;;;;;;;;;;;;;;  
+  .dw NMI        ;label to jump to for NMI
+  .dw RESET      ;label for when we first start the program
+  .dw 0          ;external interrupt?
+
+;Pattern
 
   .bank 2
   .org $0000
