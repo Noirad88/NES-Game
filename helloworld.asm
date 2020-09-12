@@ -8,6 +8,27 @@ direction_left =    $03
 direction_right =   $04
 moveAmount =        $08
 
+;core drawing function; parameters: \1 = metasprite, \2 = low_byte_position, \3 = high_byte_position,
+SET_METASPRITE_VARS MACRO 
+                    ; assigning relative variables
+                    LDY #$00
+                    LDA \1, Y
+                    STA draw_loop_width             ;we tell the operation how wide (in tiles) the metasprite is
+                    LDY #$01
+                    LDA \1, Y
+                    STA draw_loop_height            ;we tell the operation how tall (in tiles) the metasprite is
+                    LDA #$00
+                    STA draw_loop_height_counter    ;this keeps track of our rows so we can check draw_loop_height to end
+                    LDA \2
+                    STA draw_loop_start_low_byte    ;to store/alter low byte of adress
+                    LDA \3
+                    STA draw_loop_start_high_byte   ;to store/alter high byte of adress
+                    LDA #$00
+                    STA draw_loop_current_x         ;this keeps track of our current x positon so we can check draw_loop_width
+                                                    ;to know when to jump to the next row
+                    ;we start to read the metasprite ahead 2 since the first two pos are w,h
+                    LDY #$02
+                    ENDM
 
 CHANGE_BG_TILE MACRO               
                LDX $2002             ; read PPU status to reset the high/low latch
@@ -56,9 +77,8 @@ draw_loop_start_low_byte  .rs 1
 draw_loop_start_high_byte .rs 1
 draw_loop_width           .rs 1
 draw_loop_height          .rs 1
-draw_loop_tile_position   .rs 1
+draw_loop_height_counter  .rs 1
 draw_loop_current_x       .rs 1
-draw_loop_current_y       .rs 1
 
 ;;;;;;;;;;;;;;;
 
@@ -69,17 +89,15 @@ draw_loop_current_y       .rs 1
 
 metasprite:
 
-	.byte $09,$03,$09,$04,$03,$09,$03,$01,$09
-  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
-  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
-  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
-  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
-  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
-  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
-  .byte $09,$09,$09,$09,$09,$09,$09,$09,$09
+  ;first row is data: w, h,
+  .byte $04,$04
   
+  ;the draw operation fetches the width first and initially sets to y 
+	.byte $09,$09,$09,$09
+  .byte $02,$02,$02,$02
+  .byte $09,$09,$09,$09
+  .byte $09,$09,$09,$09
   
-
 background_palette:
   .db $0f,$17,$28,$36
   .db $0f,$04,$16,$25
@@ -429,7 +447,6 @@ MovePlayerEnd:
 
 
 NMI: ;start of our game loop ------------------------------------------------------
-  
   LDA #$01        ; just test/checking NMI for understanding
   STA nmi_flag 
 
@@ -437,36 +454,21 @@ NMI: ;start of our game loop ---------------------------------------------------
   STA $2000
   LDA #%00011110   
   STA $2001
-
   ; done setting up PPU
 
-DrawLogic:
+CheckDrawingBuffer:   ;checking what draw requests have been added, if any
   
   LDA do_draw
   CMP #$01
-  BNE EndDrawLogic
-  ; assigning relative variables
-  LDA #$09
-  STA draw_loop_width
-  LDA #$2D
-  STA draw_loop_start_low_byte
-  LDA #$20
-  STA draw_loop_start_high_byte
+  BEQ drawLoopSetup
+  JMP EndDrawLogic
+
+drawLoopSetup:
   LDA #$00
-  STA draw_loop_current_x
-
-
-  LDY #$00
-  ;draw_loop_start_low_byte
-  ;draw_loop_start_high_byte (constant)
-  ;draw_loop_width (#$09)
-  ;draw_loop_height (this should be calculated with start byte)
-  ;draw_loop_tile position (Y)
-  ;draw_loop_current_x
-  ;draw_loop_current_y 
+  STA do_draw
+  SET_METASPRITE_VARS metasprite, #$0D, #$21
 
 drawLoopInit:
-
   LDX $2002             ; read PPU status to reset the high/low latch
   LDX draw_loop_start_high_byte
   STX $2006             ; write the high db of $2000 address
@@ -487,17 +489,34 @@ drawLoop:
                                     ; otherwise, we need to:
   LDA #$00                          ;reset current position (draw_loop_current_x )
   STA draw_loop_current_x
+  LDX draw_loop_height_counter      ;increment the height_counter
+  INX
+  STX draw_loop_height_counter
 
-  LDA draw_loop_start_low_byte      ;increment 20 to low_byte_pointer
+                                    ;here, we need to get X to hold the low byte. after, we check if its less, which means it rolled back to #$00
+  LDA draw_loop_start_low_byte      ;increment 20 to low_byte_pointer (20 moves the starting point to the new row)
+  TAX
   MACRO_ADD_A #$20       
   STA draw_loop_start_low_byte
-                                    ;has low_byte rolled back to 00?
-  CMP #$ED                          ;compare current position OF row with height of metasprites draw operation
+  CPX draw_loop_start_low_byte      ;has low_byte rolled back to 00?
+  BCS increment_high_byte           ;then increment the high_byte
+  JMP init_new_row
+
+increment_high_byte:
+  LDX draw_loop_start_high_byte
+  INX
+  STX draw_loop_start_high_byte
+
+init_new_row:
+  ;here, we check to see if the loop_height_counter has exceeded the loop_height
+  LDA draw_loop_height_counter
+  CMP draw_loop_height              ;compare current position of row with height of metasprites draw operation
   BNE drawLoopInit                  ;if not, start drawing the new row
-  
 
 EndDrawLogic:
-  RESET_SCROLL
+
+                ;clear out drawing request container
+  RESET_SCROLL  ;reset the scroll
 
   RTI ;end of NMI/Done drawing
 
