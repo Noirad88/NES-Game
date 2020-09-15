@@ -1,87 +1,75 @@
-no_attributes =         %00000000
-top_of_screen =         $08
-bottom_of_screen =      $08
-nametable_max =         $383
-direction_up =          $01
-direction_down =        $02
-direction_left =        $03
-direction_right =       $04
-moveAmount =            $08
-drawingOperationPerFrame =  $02
-drawBuffer =                $00F1  
+no_attributes =               %00000000
+top_of_screen =               $08
+bottom_of_screen =            $08
+nametable_max =               $383
+direction_up =                $01
+direction_down =              $02
+direction_left =              $03
+direction_right =             $04
+moveAmount =                  $08
+drawingOperationPerFrame =    $02
+drawBuffer =                  $00F1  
 
-ADD_DRAW_REQUEST_METASPRITE MACRO ; adds a set of ops to drawing buffer for a metasprite (collection of sprites)
-                            PUSH_DRAWING_BUFFER #LOW(\1) ; sprite high byte
-                            PUSH_DRAWING_BUFFER #HIGH(\1) ; sprite low byte
-                            PUSH_DRAWING_BUFFER \3 ; pos high byte
-                            PUSH_DRAWING_BUFFER \4 ; pos low byte
-                            ENDM
+DRAWING_BUFFER_PUSH_METATILE  MACRO ; adds a set of ops to drawing buffer for a metasprite (collection of sprites)
+                              DRAWING_BUFFER_PUSH \1 ; sprite high byte
+                              DRAWING_BUFFER_PUSH \2 ; sprite low byte
+                              DRAWING_BUFFER_PUSH \3 ; pos high byte
+                              DRAWING_BUFFER_PUSH \4 ; pos low byte
+                              ENDM
 
-ADD_DRAW_REQUEST_TILE       MACRO ; adds a set of ops to drawing buffer 
-                            PUSH_DRAWING_BUFFER #$00 ; sprite high byte (tiles never have high bytes)
-                            PUSH_DRAWING_BUFFER \1   ; sprite low byte
-                            PUSH_DRAWING_BUFFER \2   ; pos high byte
-                            PUSH_DRAWING_BUFFER \3   ; pos low byte
-                            ENDM
+DRAWING_BUFFER_PUSH_TILE      MACRO ; adds a set of ops to drawing buffer 
+                              DRAWING_BUFFER_PUSH #$00 ; sprite high byte (tiles never have high bytes)
+                              DRAWING_BUFFER_PUSH \1   ; sprite low byte
+                              DRAWING_BUFFER_PUSH \2   ; pos high byte
+                              DRAWING_BUFFER_PUSH \3   ; pos low byte
+                              ENDM
 
-PUSH_DRAWING_BUFFER    MACRO ; adds op to drawing buffer
-                       lda \1
-                       ldx drawBufferPointer
-                       sta drawBuffer, X
-                       inx
-                       stx drawBufferPointer
-                       ENDM
+DRAWING_BUFFER_PUSH           MACRO ; adds op to drawing buffer
+                              lda \1
+                              ldx drawBufferPointer
+                              sta drawBuffer, X
+                              inx
+                              stx drawBufferPointer
+                              ENDM
 
-POP_DRAWING_BUFFER     MACRO ; removes the top item and assigns accumulator
-                       ldx drawBufferPointer
-                       lda #$00
-                       dex
-                       ldy drawBuffer, X
-                       sta drawBuffer, X
-                       stx drawBufferPointer
-                       tya
-                       ENDM
+DRAWING_BUFFER_POP            MACRO ; removes the top item and assigns accumulator
+                              ldx drawBufferPointer
+                              lda #$00
+                              dex
+                              ldy drawBuffer, X
+                              sta drawBuffer, X
+                              stx drawBufferPointer
+                              tya
+                              ENDM
 
-CLEAR_DRAWING_BUFFER   MACRO ; clears drawing buffer
-                       ldx #$00
-                       lda #$00
-                       drawingLoop:
-                       sta drawBuffer, X
-                       inx
-                       cpx #$16
-                       bne drawingLoop
-                       ldx #$00
-                       stx drawBufferPointer
-                       ENDM
+CLEAR_DRAWING_BUFFER          MACRO ; clears drawing buffer
+                              ldx #$00
+                              lda #$00
+                              drawingLoop:
+                              sta drawBuffer, X
+                              inx
+                              cpx #$16
+                              bne drawingLoop
+                              ldx #$00
+                              stx drawBufferPointer
+                              ENDM
 
-;change a single tile (more efficient function if you're not drawing a metasprite) \1=tile hex, \2=low byte, \3=high byte
-SET_BG_TILE MACRO               
+RESET_SCROLL                   MACRO
+                              LDA world_scroll_x
+                              STA $2005
+                              LDA world_scroll_y
+                              STA $2005
+                              ENDM
 
-            LDX $2002             ; read PPU status to reset the high/low latch
-            LDX draw_loop_start_high_byte
-            STX $2006             ; write the high db of $2000 address
-            LDX draw_loop_start_low_byte                ; low byte var is first
-            STX $2006             ; write the low db of $2000 address
-            LDX draw_loop_sprite                ; tile hex
-            STX $2007
-            ENDM
+MACRO_ADD_A                   MACRO ;adds using CLC  
+                              CLC
+                              ADC \1
+                              ENDM
 
-RESET_SCROLL MACRO
-             LDA world_scroll_x
-             STA $2005
-             LDA world_scroll_y
-             STA $2005
-             ENDM
-
-MACRO_ADD_A MACRO ;adds using CLC  
-            CLC
-            ADC \1
-            ENDM
-
-MACRO_SUB_A MACRO ;adds using CLC  
-            CLC
-            SBC \1
-            ENDM
+MACRO_SUB_A                   MACRO ;adds using CLC  
+                              CLC
+                              SBC \1
+                              ENDM
 
   .inesprg 1   ; 1x 16KB PRG code
   .ineschr 1   ; 1x  8KB CHR data
@@ -92,30 +80,30 @@ MACRO_SUB_A MACRO ;adds using CLC
 ;DECLARE SOME VARIABLES HERE
   .rsset $0000  ;start variables at ram location 0
   
-low_byte_pointer    .rs 1
-high_byte_pointer   .rs 1
-player_x            .rs 1  ; .rs 1 means reserve one db of space 
-player_y            .rs 1  ; .rs 1 means reserve one db of space 
-player_vel          .rs 1
-player_move_dir     .rs 1
-low_byte_count      .rs 1
-do_draw             .rs 1
-world_scroll_x      .rs 1
-world_scroll_y      .rs 1
+low_byte_pointer              .rs 1
+high_byte_pointer             .rs 1
+player_x                      .rs 1   
+player_y                      .rs 1 
+player_vel                    .rs 1
+player_move_dir               .rs 1
+low_byte_count                .rs 1
+do_draw                       .rs 1
+world_scroll_x                .rs 1
+world_scroll_y                .rs 1
 
 ; variables for core drawing operaions
-draw_loop_start_low_byte  .rs 1
-draw_loop_start_high_byte .rs 1
-draw_loop_width           .rs 1
-draw_loop_height          .rs 1
-draw_loop_height_counter  .rs 1
-draw_loop_current_x       .rs 1
-draw_loop_sprite_low_byte         .rs 1
-draw_loop_sprite_high_byte         .rs 1
-draw_loop_operation       .rs 1
+draw_loop_start_low_byte      .rs 1
+draw_loop_start_high_byte     .rs 1
+draw_loop_width               .rs 1
+draw_loop_height              .rs 1
+draw_loop_height_counter      .rs 1
+draw_loop_current_x           .rs 1
+draw_loop_sprite_low_byte     .rs 1
+draw_loop_sprite_high_byte    .rs 1
+draw_loop_operation           .rs 1
 
   .rsset $00F0
-drawBufferPointer      .rs 1
+drawBufferPointer             .rs 1
 
 ;;;;;;;;;;;;;;;
 
@@ -129,14 +117,25 @@ drawBufferPointer      .rs 1
 metasprite:
 
   ;first row is data: w, h,
-  .byte $0b,$04
+  .byte $04,$04
   
   ;the draw operation fetches the width first and initially sets to y 
-	.byte $03,$02,$09,$02
+	.byte $15,$15,$15,$15
   .byte $02,$02,$02,$02
-  .byte $09,$09,$09,$09
-  .byte $09,$09,$09,$09
+  .byte $02,$02,$02,$02
+  .byte $02,$02,$02,$02
+
+metasprite2:
+
+  ;first row is data: w, h,
+  .byte $02,$04
   
+  ;the draw operation fetches the width first and initially sets to y 
+	.byte $11,$15,$16,$17
+  .byte $02,$02,$02,$02
+  .byte $02,$17,$02,$02
+  .byte $15,$02,$02,$02
+
 background_palette:
   .db $0f,$17,$28,$36
   .db $0f,$04,$16,$25
@@ -327,7 +326,9 @@ LatchController:
   BEQ ReadBDone   ; branch to ReadADone if button is NOT pressed (0)
                   ; add instructions here to do something when button IS pressed (1)
 
-  ADD_DRAW_REQUEST_METASPRITE metasprite, #HIGH(metasprite), #$20, #$2D
+  ;testing draw operations
+  DRAWING_BUFFER_PUSH_METATILE #HIGH(metasprite), #LOW(metasprite), #$20, #$2D
+  DRAWING_BUFFER_PUSH_TILE #$09, #$20, #$f3
 
   ReadBDone:        ; handling this button is done
 
@@ -489,9 +490,11 @@ Animate: ; we jump to here if we have moved, so this is the place where we anima
 
 MovePlayerEnd:
 
-
-
-
+  ldy #$01
+  lda #LOW(metasprite)
+  sta draw_loop_operation
+  lda #HIGH(metasprite)
+  sta draw_loop_operation,Y
 
 vblankwait3:       ; First wait for vblank to make sure PPU is ready; keeps game at 60 (50?) fps
   BIT $2002
@@ -543,6 +546,7 @@ CheckDrawingBuffer:   ;checking what draw requests have been added to the stack,
   ;3 -  
 
 TestDraw:
+
   lda drawBufferPointer
   cmp #$00
   bne PrepareVars
@@ -550,18 +554,17 @@ TestDraw:
 
 PrepareVars:
 
-  ;op tile high low
   ;***instead of poping here, we could do it in the game loop first
-  ; by passing to the stack, then passing to our buffer
-  ;that way we save more nmi time
+  ; by passing to the stack, THEN passing to our buffer
+  ;that way we save more nmi time + we can queue a lot more draw operations
   
-  POP_DRAWING_BUFFER
+  DRAWING_BUFFER_POP
   sta draw_loop_start_low_byte
-  POP_DRAWING_BUFFER
+  DRAWING_BUFFER_POP
   sta draw_loop_start_high_byte
-  POP_DRAWING_BUFFER
+  DRAWING_BUFFER_POP
   sta draw_loop_sprite_low_byte
-  POP_DRAWING_BUFFER
+  DRAWING_BUFFER_POP
   sta draw_loop_sprite_high_byte
   cmp #$00                      ;00 = no high byte = tile
   bne DrawingMetaSpriteOperation
@@ -581,19 +584,16 @@ DrawingTileOperation:
 ;setup vars from stack
 DrawingMetaSpriteOperation:
 
-  ldy draw_loop_start_low_byte
-  lda (draw_loop_start_high_byte),Y
-
   ; assigning extra relative variables for metasprite
   ldx $2002                       ; read PPU status to reset the high/low latch
   ldx draw_loop_start_high_byte
   stx $2006                       ; write the high db of $2000 address
   ldx draw_loop_start_low_byte    ; low byte var is first
   LDY #$00
-  LDA draw_loop_sprite_high_byte, Y         ;sprite data at 00 (w)
+  LDA [draw_loop_sprite_low_byte], Y         ;sprite data at 00 (w)
   STA draw_loop_width             ;store it in our var
   LDY #$01
-  LDA draw_loop_sprite_high_byte, Y         ;sprite data at 01 (h)
+  LDA [draw_loop_sprite_low_byte], Y         ;sprite data at 01 (h)
   STA draw_loop_height            ;store it in our var
   LDA #$00
   STA draw_loop_height_counter
@@ -612,8 +612,8 @@ drawLoopInit:
   STA $2006                         ; write the low db of $2000 address
 
   drawLoop:
-  LDX  (draw_loop_sprite_high_byte), Y                 ; add tile on metasprite at Y in ppu
-  STX $2007
+  LDA  [draw_loop_sprite_low_byte], Y                 ; add tile on metasprite at Y in ppu
+  STA $2007
   INY                               ;increment metasprite for tile
 
   LDA draw_loop_current_x           ;increment current position in row
